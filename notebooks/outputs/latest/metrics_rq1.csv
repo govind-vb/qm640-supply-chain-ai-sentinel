@@ -1,0 +1,4 @@
+Model,Feature Set,Validation Approach,RMSE,MAE,Key Takeaway
+lag_baseline,"chokepoint_vessel_count,port_congestion_hours,vessel_draught_anomaly,commodity_roll_yield,wti_spot,natgas_hh",chronological 70/30 walk-forward,0.007233427493078003,0.004796871308192598,Best RMSE on holdout window
+ridge,"chokepoint_vessel_count,port_congestion_hours,vessel_draught_anomaly,commodity_roll_yield,wti_spot,natgas_hh",chronological 70/30 walk-forward,0.013815360604355682,0.009476826905246089,
+random_forest,"chokepoint_vessel_count,port_congestion_hours,vessel_draught_anomaly,commodity_roll_yield,wti_spot,natgas_hh",chronological 70/30 walk-forward,0.015181218873221741,0.010618022960394857,

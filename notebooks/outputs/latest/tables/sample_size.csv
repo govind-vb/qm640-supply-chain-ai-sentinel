@@ -1,0 +1,6 @@
+Research Question,Method,Key parameters,Minimum N
+RQ1,Green,alpha=.05; k=6,98
+RQ2,Green,alpha=.05; k=8,114
+RQ3,Correlation power (Fisher z),alpha=.05; power=.80; r=.15,347
+RQ4,Green,alpha=.05; k=10,130
+Final N,max(RQ1-RQ4),Protects weakest-powered RQ,347

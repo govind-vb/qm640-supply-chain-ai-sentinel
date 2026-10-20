@@ -1,0 +1,11 @@
+{
+  "failures": [
+    "EIA unavailable or key missing",
+    "PortWatch CSV not downloadable yet; physical IVs use observed market stress stand-ins documented in physical_iv_note (replace when PortWatch file is added to data/raw)"
+  ],
+  "sources_ok": [
+    "FRED",
+    "GDELT"
+  ],
+  "portwatch": "pending_real_csv"
+}

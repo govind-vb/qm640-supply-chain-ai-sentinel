@@ -4,45 +4,62 @@ Student: Govind V B
 Mentor: Sharath Srivatsa  
 Course: QM640 Data Analytics Capstone, Walsh College
 
-This repository holds the public data access materials, data dictionary, and analysis code for my capstone project on predicting commodity logistics bottlenecks with multi-modal signals (shipping congestion features and news risk scores).
+Public repository for **extracted data**, data dictionary, and analysis notebooks for the submitted synopsis topic.
+
+Repo: https://github.com/govind-vb/qm640-supply-chain-ai-sentinel
+
+## Quick start (local)
+
+```bash
+bash scripts/bootstrap_env.sh
+# edit .env with FRED_API_KEY and EIA_API_KEY
+source .venv/bin/activate
+jupyter lab notebooks/
+```
+
+Full instructions: see `SETUP.md` in the course `Week4/` folder (also summarized below).
+
+## Notebook order
+
+0. `00_setup_and_config.ipynb`
+1. `01_collect_daily_panel.ipynb`
+2. `02_cleaning_and_eda.ipynb`
+3. `03_sample_size.ipynb`
+4. `04_rq1_bottleneck_forecast.ipynb`
+5. `05_rq2_regime_classification.ipynb`
+6. `06_rq3_fusion_omega.ipynb`
+7. `07_rq4_contagion_vecm.ipynb`
 
 ## Data policy
 
-- No Kaggle datasets are used.
-- Sources are public APIs or open institutional databases.
-- No personally identifiable information is collected.
+- No Kaggle datasets
+- Sources: IMF PortWatch (when CSV available), GDELT, EIA, FRED
+- No personally identifiable information
 
 ## Repository layout
 
 ```text
 .
 ├── README.md
+├── CHANGELOG.md
 ├── data_dictionary.md
+├── requirements.txt
+├── .env.example
+├── Makefile
+├── scripts/
 ├── data/
 │   ├── raw/
 │   └── processed/
 ├── notebooks/
+│   ├── 00_...ipynb ... 07_...ipynb
+│   └── outputs/latest/{figures,tables}
 └── src/
-    ├── fetch_portwatch.py
-    ├── fetch_eia_fred.py
-    ├── fetch_gdelt.py
-    └── build_daily_panel.py
 ```
 
-## Data sources
+## After you run collection
 
-1. IMF PortWatch: https://portwatch.imf.org/
-2. NOAA MarineCadastre AIS: https://marinecadastre.gov/ais/
-3. GDELT Project: https://www.gdeltproject.org/
-4. U.S. EIA API v2: https://www.eia.gov/opendata/
-5. FRED: https://fred.stlouisfed.org/
+Commit and push `data/raw`, `data/processed`, and `notebooks/outputs` so evaluators can access extracts here. Never commit `.env`.
 
-## How to reproduce
+## Iteration log
 
-1. Clone this repository.
-2. Create a Python 3.10+ environment.
-3. Set EIA and FRED API keys as environment variables if required for those clients.
-4. Run the scripts in `src/` to pull source extracts, then `build_daily_panel.py` to join the daily panel.
-5. Use notebooks under `notebooks/` for exploratory work and modeling.
-
-See `data_dictionary.md` for variable definitions used in the analysis panel.
+Record optimizations in `CHANGELOG.md`.
