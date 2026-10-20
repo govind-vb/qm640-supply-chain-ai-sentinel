@@ -10,8 +10,8 @@ jupyter>=1.0.0,<2
 ipykernel>=6.25.0,<7
 tqdm>=4.66.0,<5
 fredapi>=0.5.1,<1
-# Optional for RQ2 FinBERT (install if you have GPU/CPU capacity)
-# torch>=2.1.0
-# transformers>=4.36.0
-# scipy is pulled in by statsmodels/sklearn
 scipy>=1.11.0,<2
+torch>=2.1.0,<3
+transformers>=4.36.0,<5
+python-docx>=1.1.0,<2
+reportlab>=4.0.0,<5

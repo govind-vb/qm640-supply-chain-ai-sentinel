@@ -201,30 +201,6 @@ def fetch_gdelt_daily_tone(days: int = 1100) -> pd.DataFrame:
     return agg.sort_values("date")
 
 
-def fetch_portwatch_chokepoint_csv(raw_dir: Path) -> pd.DataFrame | None:
-    """Attempt to download a public PortWatch / IMF chokepoint transit CSV if a stable URL works.
-
-    IMF PortWatch publishes open indicators; endpoints can move. We try known open CSV
-    patterns and save whatever succeeds. Returns None if unavailable.
-    """
-    candidates = [
-        # Public UN Global Platform / IMF related mirrors occasionally host downloads;
-        # keep list short and fail soft.
-        "https://portwatch.imf.org/datasets/eef54f890b4540dba7ccc17d79730f80_0.csv",
-    ]
-    for url in candidates:
-        try:
-            r = requests.get(url, timeout=60)
-            if r.status_code == 200 and len(r.content) > 1000:
-                out = raw_dir / "portwatch_chokepoint_raw.csv"
-                out.write_bytes(r.content)
-                df = pd.read_csv(out)
-                return df
-        except Exception as exc:  # noqa: BLE001
-            print("PortWatch candidate failed:", url, exc)
-    return None
-
-
 def add_market_features(df: pd.DataFrame) -> pd.DataFrame:
     """Add real derived market features from observed FRED/EIA prices (not fabricated AIS)."""
     out = df.copy()
@@ -234,57 +210,24 @@ def add_market_features(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def normalize_portwatch(pw: pd.DataFrame) -> pd.DataFrame | None:
-    """Map a PortWatch-like table into synopsis physical IV columns when possible."""
-    if pw is None or pw.empty:
-        return None
-    df = pw.copy()
-    date_col = next((c for c in df.columns if "date" in c.lower() or "time" in c.lower()), None)
-    if not date_col:
-        return None
-    df["date"] = pd.to_datetime(df[date_col], errors="coerce")
-    rename = {}
-    for c in df.columns:
-        cl = c.lower()
-        if "vessel" in cl and "count" in cl:
-            rename[c] = "chokepoint_vessel_count"
-        elif "transit" in cl and ("count" in cl or "number" in cl):
-            rename[c] = "chokepoint_vessel_count"
-        elif "wait" in cl or "congestion" in cl or "queue" in cl:
-            rename[c] = "port_congestion_hours"
-        elif "draught" in cl or "draft" in cl:
-            rename[c] = "vessel_draught_anomaly"
-    df = df.rename(columns=rename)
-    keep = ["date"] + [c for c in ["chokepoint_vessel_count", "port_congestion_hours", "vessel_draught_anomaly"] if c in df.columns]
-    if len(keep) == 1:
-        return None
-    daily = df[keep].groupby("date", as_index=False).mean(numeric_only=True)
-    return daily
-
-
-def engineer_targets(df: pd.DataFrame) -> pd.DataFrame:
+def engineer_targets(df: pd.DataFrame, portwatch_ok: bool = False) -> pd.DataFrame:
     out = df.copy()
-    # Physical bottleneck target prefers real congestion hours; else uses energy stress from observed prices
-    if "port_congestion_hours" in out.columns and out["port_congestion_hours"].notna().sum() > 30:
-        out["bottleneck_index_5d"] = out["port_congestion_hours"].rolling(5).mean().shift(-5)
-    else:
-        stress = out["wti_spot"].pct_change().abs().rolling(5).mean()
-        out["bottleneck_index_5d"] = stress.shift(-5)
-        if "port_congestion_hours" not in out.columns or out["port_congestion_hours"].isna().all():
-            out["port_congestion_hours"] = stress
-        if "chokepoint_vessel_count" not in out.columns or out["chokepoint_vessel_count"].isna().all():
-            # Documented stand-in: scale observed stress into a positive intensity index
-            # (not a fabricated vessel census). Replace when PortWatch CSV is merged.
-            out["chokepoint_vessel_count"] = (stress / (stress.median() + 1e-9)).clip(lower=0)
-        if "vessel_draught_anomaly" not in out.columns or out["vessel_draught_anomaly"].isna().all():
-            out["vessel_draught_anomaly"] = (
-                (out["wti_spot"] - out["wti_spot"].rolling(90).mean())
-                / (out["wti_spot"].rolling(90).std() + 1e-9)
-            )
-        out["physical_iv_note"] = (
-            "port_congestion_hours and chokepoint intensity temporarily use observed WTI "
-            "absolute-return stress until PortWatch vessel CSV is merged"
+    pw_ok = (
+        portwatch_ok
+        and "port_congestion_hours" in out.columns
+        and out["port_congestion_hours"].notna().sum() >= 300
+        and "chokepoint_vessel_count" in out.columns
+        and out["chokepoint_vessel_count"].notna().sum() >= 300
+    )
+    if not pw_ok:
+        raise RuntimeError(
+            "PortWatch physical IVs missing or too short after merge; "
+            "refusing market-stress stand-ins per project policy"
         )
+
+    out["bottleneck_index_5d"] = out["port_congestion_hours"].rolling(5).mean().shift(-5)
+    if "physical_iv_note" not in out.columns:
+        out["physical_iv_note"] = "PortWatch ArcGIS physical IVs"
 
     vol = out["wti_spot"].pct_change().rolling(10).std()
     thr = vol.median()
@@ -299,19 +242,16 @@ def engineer_targets(df: pd.DataFrame) -> pd.DataFrame:
     else:
         out["news_event_impact_score"] = np.nan
 
-    # Lexicon/GDELT-based risk score (FinBERT can replace this column in notebook 05)
-    tone = out["news_event_impact_score"].fillna(0)
-    if "gdelt_article_volume" in out.columns:
-        volz = (out["gdelt_article_volume"] - out["gdelt_article_volume"].mean()) / (
-            out["gdelt_article_volume"].std() + 1e-9
-        )
-        out["finbert_risk_probability"] = 1 / (1 + np.exp(-( -tone / 5 + volz.fillna(0))))
-    else:
+    # Placeholder until FinBERT scores are merged (finbert_daily.py overwrites this)
+    if "finbert_risk_probability" not in out.columns:
+        tone = out["news_event_impact_score"].fillna(0)
         out["finbert_risk_probability"] = 1 / (1 + np.exp(tone / 5))
     return out
 
 
 def build_daily_panel() -> tuple[pd.DataFrame, dict[str, Any]]:
+    from fetch_portwatch_arcgis import fetch_and_aggregate
+
     root = load_env()
     paths = ensure_output_dirs(root)
     meta: dict[str, Any] = {"failures": [], "sources_ok": []}
@@ -339,22 +279,24 @@ def build_daily_panel() -> tuple[pd.DataFrame, dict[str, Any]]:
         panel = fred.copy()
 
     panel = add_market_features(panel)
-    pw = fetch_portwatch_chokepoint_csv(paths["raw"])
-    daily_pw = normalize_portwatch(pw) if pw is not None else None
-    if daily_pw is not None and len(daily_pw):
-        panel = panel.merge(daily_pw, on="date", how="left")
-        meta["sources_ok"].append("PortWatch_CSV")
-        meta["portwatch"] = "merged"
-        panel["source_notes"] = "portwatch_merged"
-    else:
-        meta["failures"].append(
-            "PortWatch CSV not downloadable yet; physical IVs use observed market stress "
-            "stand-ins documented in physical_iv_note (replace when PortWatch file is added to data/raw)"
-        )
-        meta["portwatch"] = "pending_real_csv"
-        panel["source_notes"] = "portwatch_pending"
 
-    panel = engineer_targets(panel)
+    daily_pw = fetch_and_aggregate(paths["raw"])
+    panel["date"] = pd.to_datetime(panel["date"]).dt.tz_localize(None)
+    daily_pw["date"] = pd.to_datetime(daily_pw["date"]).dt.tz_localize(None)
+    # Drop any prior physical columns before merge
+    for c in ("chokepoint_vessel_count", "port_congestion_hours", "vessel_draught_anomaly", "physical_iv_note"):
+        if c in panel.columns:
+            panel = panel.drop(columns=[c])
+    panel = panel.merge(daily_pw, on="date", how="left")
+    overlap = int(panel["chokepoint_vessel_count"].notna().sum())
+    if overlap < 300:
+        raise RuntimeError(f"PortWatch overlap with FRED panel too short: {overlap} days")
+    meta["sources_ok"].append("PortWatch_ArcGIS")
+    meta["portwatch"] = "merged_arcgis"
+    meta["portwatch_overlap_days"] = overlap
+    panel["source_notes"] = "portwatch_arcgis_merged"
+
+    panel = engineer_targets(panel, portwatch_ok=True)
     panel = panel.sort_values("date").reset_index(drop=True)
     out_path = paths["processed"] / "daily_panel.csv"
     panel.to_csv(out_path, index=False)

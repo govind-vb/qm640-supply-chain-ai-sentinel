@@ -1,4 +1,5 @@
 Figure/Table Reference,What it Shows,Key Insight,Why it Matters (Link to RQ/objective),Decision/Next Step
-Figure 1,Missingness by variable,Identify incomplete PortWatch vs market coverage,RQ1 physical IV completeness,Add PortWatch CSV if vessel fields sparse
-Figure 2,WTI vs congestion/stress,Co-movement during stress windows,RQ1/RQ3 timing,Use lags in forecast models
-Figure 3,Feature correlations,Which IVs move with targets,Feature selection RQ1-RQ3,Drop near-duplicate predictors
+Table eda_descriptive_stats,Mean/median/SD for key IVs/DVs,PortWatch transit and congestion intensity have usable coverage,RQ1/RQ3 physical IV credibility,Keep PortWatch ArcGIS merge as primary physical source
+Figure 1,Missingness by variable,GDELT tone may remain sparser than PortWatch/FRED,RQ2 feature completeness,Rely on FinBERT risk with persistence between probe days
+Figure 2,WTI vs PortWatch congestion intensity,Physical stress and energy prices co-move in disruption windows,RQ1 timing / RQ3 fusion,Use lags in forecast models
+Figure 3,Feature correlations,Identify near-duplicate predictors before fusion,Feature selection RQ1-RQ3,Prefer PortWatch + FinBERT complementary sets

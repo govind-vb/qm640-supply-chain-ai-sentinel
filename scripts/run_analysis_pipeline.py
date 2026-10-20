@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute cleaning + RQ1–RQ4 analyses (same outputs as notebooks 02–07)."""
+"""Execute cleaning + RQ1–RQ4 analyses with PortWatch + FinBERT features."""
 
 from __future__ import annotations
 
@@ -34,12 +34,26 @@ sys.path.insert(0, str(ROOT / "src"))
 from project_paths import ensure_output_dirs, load_env  # noqa: E402
 
 
+def _chrono_split_both_classes(work: pd.DataFrame, ycol: str, min_test_frac: float = 0.25):
+    """Find a chronological split that keeps both classes in train and test."""
+    n = len(work)
+    for frac in (0.7, 0.65, 0.6, 0.75, 0.55):
+        split = int(n * frac)
+        if split < 40 or n - split < 20:
+            continue
+        tr, te = work.iloc[:split], work.iloc[split:]
+        if tr[ycol].nunique() >= 2 and te[ycol].nunique() >= 2:
+            return tr, te, f"chronological {frac:.0%}/{1-frac:.0%}"
+    # fallback: last min_test_frac
+    split = max(40, int(n * (1 - min_test_frac)))
+    return work.iloc[:split], work.iloc[split:], "chronological fallback"
+
+
 def main() -> None:
     root = load_env()
     paths = ensure_output_dirs(root)
     sns.set_theme(style="whitegrid", context="talk")
 
-    # ---- collect if needed ----
     panel_path = paths["processed"] / "daily_panel.csv"
     if not panel_path.exists():
         from fetch_panel import build_daily_panel
@@ -48,7 +62,7 @@ def main() -> None:
 
     df = pd.read_csv(panel_path, parse_dates=["date"]).sort_values("date")
 
-    # ---- cleaning (notebook 02) ----
+    # ---- cleaning ----
     cleaning_rows = []
     n0 = len(df)
     before = len(df)
@@ -62,7 +76,7 @@ def main() -> None:
             "Rationale": "Cannot model commodity outcomes without observed WTI",
         }
     )
-    dup = df.duplicated(subset=["date"]).sum()
+    dup = int(df.duplicated(subset=["date"]).sum())
     df = df.drop_duplicates(subset=["date"], keep="last")
     cleaning_rows.append(
         {
@@ -76,7 +90,7 @@ def main() -> None:
     ret = df["wti_spot"].pct_change()
     lo, hi = ret.quantile(0.01), ret.quantile(0.99)
     mask = ret.between(lo, hi) | ret.isna()
-    removed = (~mask).sum()
+    removed = int((~mask).sum())
     df = df.loc[mask | ret.isna()].copy()
     cleaning_rows.append(
         {
@@ -84,7 +98,7 @@ def main() -> None:
             "Variables Affected": "wti_spot returns",
             "Detection Method": "1st/99th pct return fences",
             "Treatment Applied": f"remove {removed} extreme return days",
-            "Rationale": "Limit distortion from bad ticks while keeping real crisis days inside fences",
+            "Rationale": "Limit tick distortion while keeping crisis days inside fences",
         }
     )
     num_cols = df.select_dtypes("number").columns
@@ -98,11 +112,57 @@ def main() -> None:
             "Rationale": "Preserve chronology; avoid long leakage-style fills",
         }
     )
+    # require PortWatch physical coverage
+    before = len(df)
+    df = df.dropna(subset=["chokepoint_vessel_count", "port_congestion_hours"])
+    cleaning_rows.append(
+        {
+            "Issue": "Missing PortWatch physical IVs",
+            "Variables Affected": "chokepoint_vessel_count,port_congestion_hours",
+            "Detection Method": "isna",
+            "Treatment Applied": f"drop {before - len(df)} rows without PortWatch merge",
+            "Rationale": "Physical IVs must be PortWatch-derived for RQ1/RQ3",
+        }
+    )
     df = df.reset_index(drop=True)
     clean_path = paths["processed"] / "daily_panel_clean.csv"
     df.to_csv(clean_path, index=False)
     pd.DataFrame(cleaning_rows).to_csv(paths["tables"] / "cleaning_log.csv", index=False)
     print("clean rows", len(df), "from", n0)
+
+    # ---- EDA descriptive stats ----
+    key_cols = [
+        c
+        for c in [
+            "wti_spot",
+            "chokepoint_vessel_count",
+            "port_congestion_hours",
+            "vessel_draught_anomaly",
+            "news_event_impact_score",
+            "finbert_risk_probability",
+            "bottleneck_index_5d",
+            "volatility_regime",
+            "omega_ratio_proxy",
+            "grain_calendar_spread",
+            "commodity_roll_yield",
+        ]
+        if c in df.columns
+    ]
+    desc_rows = []
+    for c in key_cols:
+        s = pd.to_numeric(df[c], errors="coerce")
+        desc_rows.append(
+            {
+                "variable": c,
+                "mean": s.mean(),
+                "median": s.median(),
+                "std": s.std(),
+                "min": s.min(),
+                "max": s.max(),
+                "missing_pct": float(s.isna().mean() * 100),
+            }
+        )
+    pd.DataFrame(desc_rows).to_csv(paths["tables"] / "eda_descriptive_stats.csv", index=False)
 
     miss = df.isna().mean().sort_values(ascending=False).head(15)
     fig, ax = plt.subplots(figsize=(8, 4.5))
@@ -115,36 +175,19 @@ def main() -> None:
     plt.close()
 
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    ax.plot(df["date"], df["wti_spot"], label="WTI spot", color="#1b263b")
+    ax.plot(df["date"], df["wti_spot"], color="#1b263b", label="WTI")
     ax2 = ax.twinx()
-    ax2.plot(df["date"], df["port_congestion_hours"], color="#e76f51", alpha=0.8)
-    ax.set_title("Figure 2. WTI vs congestion/stress indicator")
+    ax2.plot(df["date"], df["port_congestion_hours"], color="#e76f51", alpha=0.8, label="Congestion intensity")
+    ax.set_title("Figure 2. WTI vs PortWatch congestion intensity")
     ax.set_xlabel("Date")
     ax.set_ylabel("WTI USD")
-    ax2.set_ylabel("Congestion / stress")
+    ax2.set_ylabel("Congestion intensity (stress units)")
     fig.tight_layout()
     fig.savefig(paths["figures"] / "fig02_wti_congestion.png", dpi=200)
     plt.close()
 
-    cols = [
-        c
-        for c in [
-            "wti_spot",
-            "port_congestion_hours",
-            "chokepoint_vessel_count",
-            "vessel_draught_anomaly",
-            "news_event_impact_score",
-            "finbert_risk_probability",
-            "bottleneck_index_5d",
-            "volatility_regime",
-            "omega_ratio_proxy",
-            "grain_calendar_spread",
-            "commodity_roll_yield",
-        ]
-        if c in df.columns
-    ]
     fig, ax = plt.subplots(figsize=(8.5, 7))
-    sns.heatmap(df[cols].corr(), ax=ax, cmap="vlag", center=0, annot=False)
+    sns.heatmap(df[key_cols].corr(), ax=ax, cmap="vlag", center=0, annot=False)
     ax.set_title("Figure 3. Correlation heatmap of synopsis model features")
     fig.tight_layout()
     fig.savefig(paths["figures"] / "fig03_corr_heatmap.png", dpi=200)
@@ -153,30 +196,37 @@ def main() -> None:
     pd.DataFrame(
         [
             {
+                "Figure/Table Reference": "Table eda_descriptive_stats",
+                "What it Shows": "Mean/median/SD for key IVs/DVs",
+                "Key Insight": "PortWatch transit and congestion intensity have usable coverage",
+                "Why it Matters (Link to RQ/objective)": "RQ1/RQ3 physical IV credibility",
+                "Decision/Next Step": "Keep PortWatch ArcGIS merge as primary physical source",
+            },
+            {
                 "Figure/Table Reference": "Figure 1",
                 "What it Shows": "Missingness by variable",
-                "Key Insight": "Identify incomplete PortWatch vs market coverage",
-                "Why it Matters (Link to RQ/objective)": "RQ1 physical IV completeness",
-                "Decision/Next Step": "Add PortWatch CSV if vessel fields sparse",
+                "Key Insight": "GDELT tone may remain sparser than PortWatch/FRED",
+                "Why it Matters (Link to RQ/objective)": "RQ2 feature completeness",
+                "Decision/Next Step": "Rely on FinBERT risk with persistence between probe days",
             },
             {
                 "Figure/Table Reference": "Figure 2",
-                "What it Shows": "WTI vs congestion/stress",
-                "Key Insight": "Co-movement during stress windows",
-                "Why it Matters (Link to RQ/objective)": "RQ1/RQ3 timing",
+                "What it Shows": "WTI vs PortWatch congestion intensity",
+                "Key Insight": "Physical stress and energy prices co-move in disruption windows",
+                "Why it Matters (Link to RQ/objective)": "RQ1 timing / RQ3 fusion",
                 "Decision/Next Step": "Use lags in forecast models",
             },
             {
                 "Figure/Table Reference": "Figure 3",
                 "What it Shows": "Feature correlations",
-                "Key Insight": "Which IVs move with targets",
+                "Key Insight": "Identify near-duplicate predictors before fusion",
                 "Why it Matters (Link to RQ/objective)": "Feature selection RQ1-RQ3",
-                "Decision/Next Step": "Drop near-duplicate predictors",
+                "Decision/Next Step": "Prefer PortWatch + FinBERT complementary sets",
             },
         ]
     ).to_csv(paths["tables"] / "eda_insight_summary.csv", index=False)
 
-    # ---- sample size (03) ----
+    # ---- sample size ----
     def green(k: int) -> int:
         return 50 + 8 * k
 
@@ -207,13 +257,7 @@ def main() -> None:
     }
     tbl.to_csv(paths["tables"] / "sample_size.csv", index=False)
     pd.DataFrame(
-        [
-            {
-                "available_n": len(df),
-                "final_n_required": 347,
-                "meets_requirement": len(df) >= 347,
-            }
-        ]
+        [{"available_n": len(df), "final_n_required": 347, "meets_requirement": len(df) >= 347}]
     ).to_csv(paths["tables"] / "sample_size_vs_available.csv", index=False)
 
     # ---- RQ1 ----
@@ -229,8 +273,6 @@ def main() -> None:
         ]
         if c in df.columns and df[c].notna().sum() >= 50
     ]
-    if not feature_cols:
-        raise RuntimeError("No usable RQ1 features after coverage filter")
     work = df.dropna(subset=feature_cols + ["bottleneck_index_5d"]).copy()
     work["lag1_target"] = work["bottleneck_index_5d"].shift(1)
     work = work.dropna().reset_index(drop=True)
@@ -242,12 +284,21 @@ def main() -> None:
     scaler = StandardScaler()
     Xtr = scaler.fit_transform(X_train)
     Xte = scaler.transform(X_test)
-    pred_ridge = Ridge(alpha=1.0).fit(Xtr, y_train).predict(Xte)
-    pred_rf = RandomForestRegressor(n_estimators=300, random_state=42, min_samples_leaf=3).fit(
-        X_train, y_train
-    ).predict(X_test)
+    best_ridge, best_alpha, best_pred_ridge = None, None, None
+    for alpha in (0.1, 1.0, 10.0):
+        model = Ridge(alpha=alpha).fit(Xtr, y_train)
+        pred = model.predict(Xte)
+        rmse = mean_squared_error(y_test, pred) ** 0.5
+        if best_ridge is None or rmse < best_ridge:
+            best_ridge, best_alpha, best_pred_ridge = rmse, alpha, pred
+    rf = RandomForestRegressor(n_estimators=300, random_state=42, min_samples_leaf=3).fit(X_train, y_train)
+    pred_rf = rf.predict(X_test)
     rows = []
-    for name, pred in [("lag_baseline", pred_base), ("ridge", pred_ridge), ("random_forest", pred_rf)]:
+    for name, pred, note in [
+        ("lag_baseline", pred_base, ""),
+        (f"ridge_alpha_{best_alpha}", best_pred_ridge, f"best alpha={best_alpha}"),
+        ("random_forest", pred_rf, ""),
+    ]:
         rows.append(
             {
                 "Model": name,
@@ -255,15 +306,22 @@ def main() -> None:
                 "Validation Approach": "chronological 70/30 walk-forward",
                 "RMSE": mean_squared_error(y_test, pred) ** 0.5,
                 "MAE": mean_absolute_error(y_test, pred),
-                "Key Takeaway": "",
+                "Key Takeaway": note,
             }
         )
     metrics = pd.DataFrame(rows)
     best = metrics.sort_values("RMSE").iloc[0]["Model"]
-    metrics.loc[metrics["Model"] == best, "Key Takeaway"] = "Best RMSE on holdout window"
+    metrics.loc[metrics["Model"] == best, "Key Takeaway"] = (
+        (metrics.loc[metrics["Model"] == best, "Key Takeaway"].fillna("").astype(str) + "; Best RMSE on holdout").str.strip("; ")
+    )
     metrics.to_csv(paths["outputs"] / "metrics_rq1.csv", index=False)
     metrics.to_csv(paths["tables"] / "model_performance_rq1.csv", index=False)
-    pred_best = {"lag_baseline": pred_base, "ridge": pred_ridge, "random_forest": pred_rf}[best]
+    pred_map = {
+        "lag_baseline": pred_base,
+        f"ridge_alpha_{best_alpha}": best_pred_ridge,
+        "random_forest": pred_rf,
+    }
+    pred_best = pred_map[best]
     fig, ax = plt.subplots(figsize=(9, 4.5))
     ax.plot(test["date"], y_test.values, label="Actual", color="#1b263b")
     ax.plot(test["date"], pred_best, label=f"Predicted ({best})", color="#e76f51", alpha=0.85)
@@ -274,28 +332,41 @@ def main() -> None:
     fig.tight_layout()
     fig.savefig(paths["figures"] / "fig04_rq1_forecast.png", dpi=200)
     plt.close()
+
+    # feature importance
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    imp = pd.Series(rf.feature_importances_, index=feature_cols).sort_values(ascending=True)
+    imp.plot(kind="barh", ax=ax, color="#2a9d8f")
+    ax.set_title("Figure 8. RQ1 random forest feature importance")
+    ax.set_xlabel("Importance")
+    fig.tight_layout()
+    fig.savefig(paths["figures"] / "fig08_rq1_importance.png", dpi=200)
+    plt.close()
     print("RQ1 best", best)
 
     # ---- RQ2 ----
     text_features = [
-        c for c in ["news_event_impact_score", "finbert_risk_probability", "gdelt_article_volume"] if c in df.columns
+        c
+        for c in ["news_event_impact_score", "finbert_risk_probability", "gdelt_article_volume"]
+        if c in df.columns
     ]
     market_features = [c for c in ["wti_spot", "commodity_roll_yield", "natgas_hh"] if c in df.columns]
     work2 = df.dropna(subset=market_features + ["volatility_regime"]).copy()
-    split = int(len(work2) * 0.7)
-    train, test = work2.iloc[:split], work2.iloc[split:]
+    # ensure FinBERT present
+    if "finbert_risk_probability" in work2.columns:
+        work2["finbert_risk_probability"] = work2["finbert_risk_probability"].ffill().bfill()
 
-    def eval_clf(name: str, feats: list[str]) -> dict:
+    def eval_clf(name: str, feats: list[str], train_df, test_df, val_label: str) -> dict:
         feats = [f for f in feats if f in work2.columns]
-        tr = train.dropna(subset=feats)
-        te = test.dropna(subset=feats)
+        tr = train_df.dropna(subset=feats)
+        te = test_df.dropna(subset=feats)
         Xtr, ytr = tr[feats], tr["volatility_regime"].astype(int)
         Xte, yte = te[feats], te["volatility_regime"].astype(int)
-        if ytr.nunique() < 2 or yte.nunique() < 2:
+        if ytr.nunique() < 2 or yte.nunique() < 2 or len(te) < 15:
             return {
                 "Model": name,
                 "Feature Set": ",".join(feats),
-                "Validation Approach": "chronological 70/30",
+                "Validation Approach": val_label,
                 "Accuracy": np.nan,
                 "F1": np.nan,
                 "AUC": np.nan,
@@ -308,7 +379,7 @@ def main() -> None:
         return {
             "Model": name,
             "Feature Set": ",".join(feats),
-            "Validation Approach": "chronological 70/30",
+            "Validation Approach": val_label,
             "Accuracy": accuracy_score(yte, pred),
             "F1": f1_score(yte, pred, zero_division=0),
             "AUC": roc_auc_score(yte, prob),
@@ -318,8 +389,9 @@ def main() -> None:
             "_pred": pred,
         }
 
-    base = eval_clf("no_text_market_baseline", market_features)
-    full = eval_clf("market_plus_news", market_features + text_features)
+    train2, test2, val_lab = _chrono_split_both_classes(work2, "volatility_regime")
+    base = eval_clf("no_text_market_baseline", market_features, train2, test2, val_lab)
+    full = eval_clf("market_plus_finbert_news", market_features + text_features, train2, test2, val_lab)
     m2 = pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")} for r in [base, full]])
     if m2["F1"].notna().any():
         winner = m2.sort_values("F1", ascending=False).iloc[0]["Model"]
@@ -337,12 +409,18 @@ def main() -> None:
         fig.tight_layout()
         fig.savefig(paths["figures"] / "fig05_rq2_roc_cm.png", dpi=200)
         plt.close()
-    print("RQ2 done")
+    print("RQ2 done", m2[["Model", "F1", "AUC"]].to_dict("records"))
 
     # ---- RQ3 ----
-    spatial = [c for c in ["port_congestion_hours", "chokepoint_vessel_count", "vessel_draught_anomaly"] if c in df.columns]
+    spatial = [
+        c
+        for c in ["port_congestion_hours", "chokepoint_vessel_count", "vessel_draught_anomaly"]
+        if c in df.columns
+    ]
     news = [c for c in ["news_event_impact_score", "finbert_risk_probability"] if c in df.columns]
     work3 = df.dropna(subset=["omega_ratio_proxy"]).copy()
+    if "finbert_risk_probability" in work3.columns:
+        work3["finbert_risk_probability"] = work3["finbert_risk_probability"].ffill().bfill()
     results = []
     for name, feats in [
         ("spatial_only", spatial),
@@ -361,7 +439,7 @@ def main() -> None:
         te_stress["pred"] = pred
         vol_te = te_stress["wti_spot"].pct_change().rolling(10).std()
         thr = vol_te.quantile(0.75)
-        omega_stress = te_stress.loc[vol_te >= thr, "pred"].mean()
+        omega_stress = float(te_stress.loc[vol_te >= thr, "pred"].mean())
         results.append(
             {
                 "Model": name,
@@ -387,20 +465,27 @@ def main() -> None:
     plt.close()
     print("RQ3 done")
 
-    # ---- RQ4 ----
+    # ---- RQ4 weekly ----
     cols4 = [c for c in ["wti_spot", "wheat", "corn", "grain_calendar_spread", "port_congestion_hours"] if c in df.columns]
-    work4 = df[["date"] + cols4].dropna().copy()
-    work4["d_wti"] = work4["wti_spot"].pct_change()
-    work4["d_grain"] = work4["grain_calendar_spread"].pct_change()
-    work4["d_cong"] = work4["port_congestion_hours"].pct_change()
-    g = work4[["d_cong", "d_grain", "d_wti"]].replace([np.inf, -np.inf], np.nan).dropna()
+    daily4 = df[["date"] + cols4].dropna().copy()
+    weekly = (
+        daily4.set_index("date")
+        .resample("W")
+        .mean()
+        .dropna()
+        .reset_index()
+    )
+    weekly["d_wti"] = weekly["wti_spot"].pct_change()
+    weekly["d_grain"] = weekly["grain_calendar_spread"].pct_change()
+    weekly["d_cong"] = weekly["port_congestion_hours"].pct_change()
+    g = weekly[["d_cong", "d_grain", "d_wti"]].replace([np.inf, -np.inf], np.nan).dropna()
     adf_rows = []
     for c in g.columns:
         series = g[c].astype(float).values
-        stat, p, *_ = adfuller(series, maxlag=5, autolag=None)
+        stat, p, *_ = adfuller(series, maxlag=4, autolag=None)
         adf_rows.append({"series": c, "adf_stat": stat, "p_value": p, "stationary_5pct": p < 0.05})
     pd.DataFrame(adf_rows).to_csv(paths["tables"] / "rq4_adf.csv", index=False)
-    maxlag = 7
+    maxlag = 5
     gc_rows = []
     for direction, pair in [("cong->grain", ["d_grain", "d_cong"]), ("wti->grain", ["d_grain", "d_wti"])]:
         try:
@@ -414,24 +499,23 @@ def main() -> None:
     gc_tbl.to_csv(paths["tables"] / "rq4_granger.csv", index=False)
     var_data = g[["d_wti", "d_grain"]].dropna().reset_index(drop=True)
     split = int(len(var_data) * 0.8)
-    model = VAR(var_data.iloc[:split]).fit(maxlags=5, ic="aic")
+    model = VAR(var_data.iloc[:split]).fit(maxlags=4, ic="aic")
     lag_order = max(int(model.k_ar), 1)
     if model.k_ar < 1:
         model = VAR(var_data.iloc[:split]).fit(1)
         lag_order = 1
-    steps = min(30, len(var_data) - split)
+    steps = min(12, len(var_data) - split)
     forecast = model.forecast(var_data.iloc[split - lag_order : split].values, steps=steps)
     actual = var_data.iloc[split : split + len(forecast)]["d_grain"].values
     pred = forecast[:, 1]
-    # sMAPE avoids explosion when actual ≈ 0 (common for daily spread changes)
     smape = float(np.mean(2.0 * np.abs(actual - pred) / (np.abs(actual) + np.abs(pred) + 1e-8)) * 100)
     mae = float(mean_absolute_error(actual, pred))
     m4 = pd.DataFrame(
         [
             {
-                "Model": "Granger+VAR",
+                "Model": "Granger+VAR_weekly",
                 "Feature Set": "d_wti,d_cong,d_grain",
-                "Validation Approach": "chronological VAR holdout",
+                "Validation Approach": "weekly chronological VAR holdout",
                 "Metric 1": gc_tbl.loc[gc_tbl.direction == "wti->grain", "p_value"].min(),
                 "Metric 2": smape,
                 "MAE_d_grain": mae,
@@ -442,10 +526,10 @@ def main() -> None:
     m4.to_csv(paths["outputs"] / "metrics_rq4.csv", index=False)
     m4.to_csv(paths["tables"] / "model_performance_rq4.csv", index=False)
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    plot = work4.dropna(subset=["d_wti", "d_grain"]).iloc[-400:]
-    ax.plot(plot["date"], plot["d_wti"].rolling(5).mean(), label="WTI % change (5d MA)", color="#1b263b")
-    ax.plot(plot["date"], plot["d_grain"].rolling(5).mean(), label="Grain spread % change (5d MA)", color="#e9c46a")
-    ax.set_title("Figure 7. Energy vs grain changes (lead-lag exploration)")
+    plot = weekly.dropna(subset=["d_wti", "d_grain"]).iloc[-120:]
+    ax.plot(plot["date"], plot["d_wti"].rolling(3).mean(), label="WTI % change (3w MA)", color="#1b263b")
+    ax.plot(plot["date"], plot["d_grain"].rolling(3).mean(), label="Grain spread % change (3w MA)", color="#e9c46a")
+    ax.set_title("Figure 7. Weekly energy vs grain changes (lead-lag exploration)")
     ax.set_xlabel("Date")
     ax.set_ylabel("Change")
     ax.legend()

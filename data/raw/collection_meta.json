@@ -1,11 +1,12 @@
 {
   "failures": [
-    "EIA unavailable or key missing",
-    "PortWatch CSV not downloadable yet; physical IVs use observed market stress stand-ins documented in physical_iv_note (replace when PortWatch file is added to data/raw)"
+    "EIA unavailable or key missing"
   ],
   "sources_ok": [
     "FRED",
-    "GDELT"
+    "GDELT",
+    "PortWatch_ArcGIS"
   ],
-  "portwatch": "pending_real_csv"
+  "portwatch": "merged_arcgis",
+  "portwatch_overlap_days": 2113
 }

@@ -73,4 +73,13 @@ make check
 - **Kernel missing:** re-run `python -m ipykernel install --user --name qm640-sentinel --display-name "Python (qm640-sentinel)"` inside the venv.
 - **Import errors:** `source .venv/bin/activate && pip install -r requirements.txt`
 - **API failures:** confirm keys in `.env`, then re-run notebook `01`. Partial source failures are logged; do not invent synthetic market history.
-- **FinBERT optional:** RQ2 works with a GDELT/lexicon baseline first. Install `torch` and `transformers` later if you want FinBERT.
+- **FinBERT (required for full RQ2):** Torch has no Python 3.14 wheels. Use the sidecar venv:
+
+```bash
+/usr/local/bin/python3.12 -m venv .venv_finbert
+source .venv_finbert/bin/activate
+pip install 'torch>=2.1,<3' 'transformers>=4.36,<5' 'numpy<2' pandas requests python-dotenv tqdm
+cd github_scaffold && PYTHONPATH=src python src/finbert_daily.py --force
+```
+
+- **PortWatch:** pulled via public ArcGIS Daily_Chokepoints_Data (no API key). Cached at `data/raw/portwatch_chokepoints_daily.csv`.

@@ -1,5 +1,6 @@
 Issue,Variables Affected,Detection Method,Treatment Applied,Rationale
 Missing core market anchor,"date,wti_spot",isna,drop 3 rows,Cannot model commodity outcomes without observed WTI
 Duplicates,date,duplicated(date),drop 0 duplicate dates,One row per day for panel models
-Outliers,wti_spot returns,1st/99th pct return fences,remove 44 extreme return days,Limit distortion from bad ticks while keeping real crisis days inside fences
+Outliers,wti_spot returns,1st/99th pct return fences,remove 44 extreme return days,Limit tick distortion while keeping crisis days inside fences
 Missing values,"wti_spot,brent_spot,natgas_hh,wheat,corn,soy,gdelt_tone,commodity_roll_yield,...",isna sum,"ffill limit 3, bfill limit 1",Preserve chronology; avoid long leakage-style fills
+Missing PortWatch physical IVs,"chokepoint_vessel_count,port_congestion_hours",isna,drop 0 rows without PortWatch merge,Physical IVs must be PortWatch-derived for RQ1/RQ3
