@@ -1,4 +1,4 @@
 Model,Feature Set,Validation Approach,RMSE_omega,MeanPredOmega_stress,Key Takeaway
-spatial_only,"port_congestion_hours,chokepoint_vessel_count,vessel_draught_anomaly",chronological 70/30,1.3077862222949799,1.6779672592498365,Lowest Omega RMSE; check stress mean too
-news_only,"news_event_impact_score,finbert_risk_probability",chronological 70/30,1.8026540384827696,1.6723135980536477,
-early_fusion,"port_congestion_hours,chokepoint_vessel_count,vessel_draught_anomaly,news_event_impact_score,finbert_risk_probability",chronological 70/30,1.5683347818920643,2.134806588175927,
+spatial_only,"port_congestion_hours,chokepoint_vessel_count,vessel_draught_anomaly",chronological 70/30,1.3077862222949799,1.677967259249836,
+news_only,"news_event_impact_score,finbert_risk_probability",chronological 70/30,0.22251787701032474,,Lowest Omega RMSE; check stress mean too
+early_fusion,"port_congestion_hours,chokepoint_vessel_count,vessel_draught_anomaly,news_event_impact_score,finbert_risk_probability",chronological 70/30,0.2424116008909892,,

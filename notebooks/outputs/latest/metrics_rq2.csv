@@ -1,3 +1,3 @@
 Model,Feature Set,Validation Approach,Accuracy,F1,AUC,Key Takeaway
 no_text_market_baseline,"wti_spot,commodity_roll_yield,natgas_hh",chronological 70/30,0.551219512195122,0.591715976331361,0.6161273209549072,Higher F1 on holdout
-market_plus_news,"wti_spot,commodity_roll_yield,natgas_hh,news_event_impact_score,finbert_risk_probability",chronological 70/30,0.5316666666666666,0.4033970276008493,0.49145517862904575,
+market_plus_news,"wti_spot,commodity_roll_yield,natgas_hh,news_event_impact_score,finbert_risk_probability",chronological 70/30,,,,Need both classes in split

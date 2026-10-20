@@ -26,3 +26,9 @@ Synopsis lock: RQ1–RQ4, Final N = 347, PortWatch / GDELT / EIA / FRED only (no
 - Why: Satisfy interim data-availability on public GitHub and produce mentor draft from real metrics/figures
 - Files: data/raw/*, data/processed/daily_panel*.csv, notebooks/outputs/latest/*, Week4/Govind_VB_Interim_Report_Mentor_Draft.docx|.pdf, scripts/run_analysis_pipeline.py
 - Result: cleaned N≈2066 (> Final N 347); RQ1 best=lag_baseline; RQ2 market-only higher F1 than news proxy; RQ3 spatial_only lowest Omega RMSE; RQ4 Granger WTI→grain not significant at 5% in first pass; PortWatch CSV still pending (documented stand-ins)
+
+- Change: Executed notebooks 00–07 via Jupyter (inplace outputs) and regenerated interim PDF/DOCX from those artifacts
+- Why: Prior run used scripts/run_analysis_pipeline.py equivalent; user requested notebook execution with outputs in report
+- Files: github_scaffold/notebooks/0*.ipynb, notebooks/outputs/latest/*, Week4/Govind_VB_Interim_Report_Mentor_Draft.pdf|.docx, Week4/notebooks/
+- Result: all 8 notebooks executed with cell outputs; figures fig01–fig07 and metrics_rq1–rq4 refreshed in report
+

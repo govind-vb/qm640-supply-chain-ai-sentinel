@@ -1,2 +1,2 @@
-Model,Feature Set,Validation Approach,Metric 1,Metric 2,MAE_d_grain,Key Takeaway
-Granger+VAR,"d_wti,d_cong,d_grain",chronological VAR holdout,0.5761934800277554,199.97076229999,0.02575821979065047,Metric1=min Granger p (wti->grain); Metric2=sMAPE %
+Model,Feature Set,Validation Approach,Metric 1,Metric 2,Key Takeaway
+Granger+VAR,"d_wti,d_cong,d_grain",chronological VAR holdout,0.5761934800277554,199.97076229999,Metric1=min Granger p (wti->grain); Metric2=sMAPE %
